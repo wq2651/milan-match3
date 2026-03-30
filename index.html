@@ -197,6 +197,7 @@
     let isAnimating = false;
     let musicEnabled = false;
     let audioCtx = null;
+    let bgmNodes = null;
 
     const gridEl = document.getElementById('grid');
     const scoreEl = document.getElementById('score');
@@ -208,15 +209,112 @@
     // 水果emoji - 莫兰迪风格
     const FRUITS = ['🍎', '🍐', '🍊', '🍋', '🍇', '🍓', '🍑', '🍒'];
 
+    // ========== 背景音乐 ==========
+    // 舒缓的 ambient 音乐，使用 Web Audio API 生成
     function initAudio() {
       if (!audioCtx) {
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       }
     }
 
-    function playSound(type) {
-      if (!musicEnabled) return;
+    // 创建舒缓的背景音乐 - 和弦垫音
+    function createAmbientBGM() {
       initAudio();
+
+      const nodes = [];
+      const masterGain = audioCtx.createGain();
+      masterGain.gain.value = 0.12;
+      masterGain.connect(audioCtx.destination);
+
+      // 低通滤波器让声音更柔和
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 400;
+      filter.Q.value = 1;
+      filter.connect(masterGain);
+
+      // 基础和弦频率 (C major 7 - 放松的调式)
+      const chordFreqs = [130.81, 164.81, 196.00, 246.94]; // C3, E3, G3, B3
+
+      chordFreqs.forEach((freq, i) => {
+        const osc = audioCtx.createOscillator();
+        const oscGain = audioCtx.createGain();
+
+        // 使用正弦波，柔和不刺耳
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+
+        // 轻微的频率波动，像呼吸一样
+        const lfo = audioCtx.createOscillator();
+        const lfoGain = audioCtx.createGain();
+        lfo.type = 'sine';
+        lfo.frequency.value = 0.1 + i * 0.02; // 极慢的波动
+        lfoGain.gain.value = freq * 0.003; // 很小的波动幅度
+        lfo.connect(lfoGain);
+        lfoGain.connect(osc.frequency);
+        lfo.start();
+
+        // 音量随时间缓慢变化
+        oscGain.gain.value = 0.25;
+        const volLfo = audioCtx.createOscillator();
+        const volLfoGain = audioCtx.createGain();
+        volLfo.type = 'sine';
+        volLfo.frequency.value = 0.08 + i * 0.01;
+        volLfoGain.gain.value = 0.08;
+        volLfo.connect(volLfoGain);
+        volLfoGain.connect(oscGain.gain);
+        volLfo.start();
+
+        osc.connect(oscGain);
+        oscGain.connect(filter);
+        osc.start();
+
+        nodes.push({ osc, lfo, oscGain, volLfo, volLfoGain });
+      });
+
+      // 添加一个极低的持续音作为 bass pad
+      const bassOsc = audioCtx.createOscillator();
+      const bassGain = audioCtx.createGain();
+      bassOsc.type = 'sine';
+      bassOsc.frequency.value = 65.41; // C2
+      bassGain.gain.value = 0.15;
+      bassOsc.connect(bassGain);
+      bassGain.connect(filter);
+      bassOsc.start();
+      nodes.push({ osc: bassOsc, bassGain });
+
+      // 添加柔和的高音泛音
+      const highOsc = audioCtx.createOscillator();
+      const highGain = audioCtx.createGain();
+      highOsc.type = 'triangle';
+      highOsc.frequency.value = 523.25; // C5
+      highGain.gain.value = 0.03;
+      highOsc.connect(highGain);
+      highGain.connect(filter);
+      highOsc.start();
+      nodes.push({ osc: highOsc, highGain });
+
+      return { nodes, masterGain };
+    }
+
+    function startBGM() {
+      if (bgmNodes) return;
+      bgmNodes = createAmbientBGM();
+    }
+
+    function stopBGM() {
+      if (!bgmNodes) return;
+      bgmNodes.nodes.forEach(node => {
+        if (node.osc) node.osc.stop();
+        if (node.lfo) node.lfo.stop();
+        if (node.volLfo) node.volLfo.stop();
+      });
+      bgmNodes = null;
+    }
+
+    // ========== 音效 ==========
+    function playSound(type) {
+      if (!musicEnabled || !audioCtx) return;
 
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
@@ -226,28 +324,28 @@
       if (type === 'select') {
         osc.frequency.value = 440;
         osc.type = 'sine';
-        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
         gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
         osc.start();
         osc.stop(audioCtx.currentTime + 0.1);
       } else if (type === 'match') {
         osc.frequency.value = 523;
         osc.type = 'sine';
-        gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
         gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
         osc.start();
         osc.stop(audioCtx.currentTime + 0.2);
       } else if (type === 'combo') {
         osc.frequency.value = 659;
         osc.type = 'sine';
-        gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
         gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
         osc.start();
         osc.stop(audioCtx.currentTime + 0.3);
       } else if (type === 'swap') {
         osc.frequency.value = 330;
         osc.type = 'triangle';
-        gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.06, audioCtx.currentTime);
         gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.08);
         osc.start();
         osc.stop(audioCtx.currentTime + 0.08);
@@ -258,7 +356,9 @@
       musicEnabled = !musicEnabled;
       musicBtn.textContent = musicEnabled ? '🎵 音乐: 开' : '🎵 音乐: 关';
       if (musicEnabled) {
-        initAudio();
+        startBGM();
+      } else {
+        stopBGM();
       }
     }
 
