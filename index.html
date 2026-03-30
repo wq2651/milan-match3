@@ -139,17 +139,6 @@
       background: #6D6560;
     }
 
-    .btn-music {
-      margin-top: 8px;
-      padding: 8px 20px;
-      font-size: 0.85rem;
-      background: #9CA38F;
-      color: #F0EDE8;
-      border: none;
-      border-radius: 20px;
-      cursor: pointer;
-    }
-
     .message {
       margin-top: 12px;
       color: #8B8580;
@@ -182,7 +171,6 @@
   </div>
 
   <button class="btn" id="restartBtn">重新开始</button>
-  <button class="btn-music" id="musicBtn">🎵 音乐: 关</button>
   <div class="message" id="message"></div>
 
   <script>
@@ -195,9 +183,6 @@
     let score = 0;
     let combo = 0;
     let isAnimating = false;
-    let musicEnabled = false;
-    let audioCtx = null;
-    let bgmNodes = null;
     let hintShown = false;
 
     const gridEl = document.getElementById('grid');
@@ -205,120 +190,14 @@
     const comboEl = document.getElementById('combo');
     const messageEl = document.getElementById('message');
     const restartBtn = document.getElementById('restartBtn');
-    const musicBtn = document.getElementById('musicBtn');
 
     // 水果emoji - 莫兰迪风格
     const FRUITS = ['🍎', '🍐', '🍊', '🍋', '🍇', '🍓', '🍑', '🍒'];
 
-    // ========== 背景音乐 ==========
-    // 舒缓的 ambient 音乐，使用 Web Audio API 生成
-    function initAudio() {
-      if (!audioCtx) {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      }
-    }
-
-    // 创建舒缓的背景音乐 - 和弦垫音
-    function createAmbientBGM() {
-      initAudio();
-
-      const nodes = [];
-      const masterGain = audioCtx.createGain();
-      masterGain.gain.value = 0.12;
-      masterGain.connect(audioCtx.destination);
-
-      // 低通滤波器让声音更柔和
-      const filter = audioCtx.createBiquadFilter();
-      filter.type = 'lowpass';
-      filter.frequency.value = 400;
-      filter.Q.value = 1;
-      filter.connect(masterGain);
-
-      // 基础和弦频率 (C major 7 - 放松的调式)
-      const chordFreqs = [130.81, 164.81, 196.00, 246.94]; // C3, E3, G3, B3
-
-      chordFreqs.forEach((freq, i) => {
-        const osc = audioCtx.createOscillator();
-        const oscGain = audioCtx.createGain();
-
-        // 使用正弦波，柔和不刺耳
-        osc.type = 'sine';
-        osc.frequency.value = freq;
-
-        // 轻微的频率波动，像呼吸一样
-        const lfo = audioCtx.createOscillator();
-        const lfoGain = audioCtx.createGain();
-        lfo.type = 'sine';
-        lfo.frequency.value = 0.1 + i * 0.02; // 极慢的波动
-        lfoGain.gain.value = freq * 0.003; // 很小的波动幅度
-        lfo.connect(lfoGain);
-        lfoGain.connect(osc.frequency);
-        lfo.start();
-
-        // 音量随时间缓慢变化
-        oscGain.gain.value = 0.25;
-        const volLfo = audioCtx.createOscillator();
-        const volLfoGain = audioCtx.createGain();
-        volLfo.type = 'sine';
-        volLfo.frequency.value = 0.08 + i * 0.01;
-        volLfoGain.gain.value = 0.08;
-        volLfo.connect(volLfoGain);
-        volLfoGain.connect(oscGain.gain);
-        volLfo.start();
-
-        osc.connect(oscGain);
-        oscGain.connect(filter);
-        osc.start();
-
-        nodes.push({ osc, lfo, oscGain, volLfo, volLfoGain });
-      });
-
-      // 添加一个极低的持续音作为 bass pad
-      const bassOsc = audioCtx.createOscillator();
-      const bassGain = audioCtx.createGain();
-      bassOsc.type = 'sine';
-      bassOsc.frequency.value = 65.41; // C2
-      bassGain.gain.value = 0.15;
-      bassOsc.connect(bassGain);
-      bassGain.connect(filter);
-      bassOsc.start();
-      nodes.push({ osc: bassOsc, bassGain });
-
-      // 添加柔和的高音泛音
-      const highOsc = audioCtx.createOscillator();
-      const highGain = audioCtx.createGain();
-      highOsc.type = 'triangle';
-      highOsc.frequency.value = 523.25; // C5
-      highGain.gain.value = 0.03;
-      highOsc.connect(highGain);
-      highGain.connect(filter);
-      highOsc.start();
-      nodes.push({ osc: highOsc, highGain });
-
-      return { nodes, masterGain };
-    }
-
-    function startBGM() {
-      if (bgmNodes) return;
-      bgmNodes = createAmbientBGM();
-    }
-
-    function stopBGM() {
-      if (!bgmNodes) return;
-      bgmNodes.nodes.forEach(node => {
-        if (node.osc) node.osc.stop();
-        if (node.lfo) node.lfo.stop();
-        if (node.volLfo) node.volLfo.stop();
-      });
-      bgmNodes = null;
-    }
-
     // ========== 提示系统 ==========
     function findHint() {
-      // 尝试每个格子，和相邻格子交换，看是否能形成匹配
       for (let r = 0; r < ROWS; r++) {
         for (let c = 0; c < COLS; c++) {
-          // 尝试和右边的交换
           if (c < COLS - 1) {
             [grid[r][c], grid[r][c+1]] = [grid[r][c+1], grid[r][c]];
             if (findMatches().length > 0) {
@@ -327,7 +206,6 @@
             }
             [grid[r][c], grid[r][c+1]] = [grid[r][c+1], grid[r][c]];
           }
-          // 尝试和下边的交换
           if (r < ROWS - 1) {
             [grid[r][c], grid[r+1][c]] = [grid[r+1][c], grid[r][c]];
             if (findMatches().length > 0) {
@@ -345,7 +223,6 @@
       const hint = findHint();
       if (hint) {
         showMessage('有可消除的了，快试试！');
-        // 高亮提示的格子
         const idx1 = hint.r1 * COLS + hint.c1;
         const idx2 = hint.r2 * COLS + hint.c2;
         const cells = gridEl.children;
@@ -357,7 +234,6 @@
         }, 2000);
       } else {
         showMessage('无法消除，需要重排！');
-        // 自动重排
         setTimeout(() => {
           rearrangeGrid();
         }, 1000);
@@ -365,28 +241,23 @@
     }
 
     function rearrangeGrid() {
-      // 收集所有水果
       const fruits = [];
       for (let r = 0; r < ROWS; r++) {
         for (let c = 0; c < COLS; c++) {
           fruits.push(grid[r][c]);
         }
       }
-      // 洗牌
       for (let i = fruits.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [fruits[i], fruits[j]] = [fruits[j], fruits[i]];
       }
-      // 重新放回
       let idx = 0;
       for (let r = 0; r < ROWS; r++) {
         for (let c = 0; c < COLS; c++) {
           grid[r][c] = fruits[idx++];
         }
       }
-      // 确保有可消除的
       while (findMatches().length === 0 && findHint() === null) {
-        // 再洗牌
         for (let i = fruits.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
           [fruits[i], fruits[j]] = [fruits[j], fruits[i]];
@@ -399,56 +270,6 @@
         }
       }
       render();
-    }
-
-    // ========== 音效 ==========
-    function playSound(type) {
-      if (!musicEnabled || !audioCtx) return;
-
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-
-      if (type === 'select') {
-        osc.frequency.value = 440;
-        osc.type = 'sine';
-        gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
-        osc.start();
-        osc.stop(audioCtx.currentTime + 0.1);
-      } else if (type === 'match') {
-        osc.frequency.value = 523;
-        osc.type = 'sine';
-        gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
-        osc.start();
-        osc.stop(audioCtx.currentTime + 0.2);
-      } else if (type === 'combo') {
-        osc.frequency.value = 659;
-        osc.type = 'sine';
-        gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
-        osc.start();
-        osc.stop(audioCtx.currentTime + 0.3);
-      } else if (type === 'swap') {
-        osc.frequency.value = 330;
-        osc.type = 'triangle';
-        gain.gain.setValueAtTime(0.06, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.08);
-        osc.start();
-        osc.stop(audioCtx.currentTime + 0.08);
-      }
-    }
-
-    function toggleMusic() {
-      musicEnabled = !musicEnabled;
-      musicBtn.textContent = musicEnabled ? '🎵 音乐: 开' : '🎵 音乐: 关';
-      if (musicEnabled) {
-        startBGM();
-      } else {
-        stopBGM();
-      }
     }
 
     function init() {
@@ -511,7 +332,6 @@
 
       if (!selected) {
         selected = { r, c };
-        playSound('select');
         render();
       } else {
         const dr = Math.abs(selected.r - r);
@@ -521,7 +341,6 @@
           swap(selected.r, selected.c, r, c);
         } else {
           selected = { r, c };
-          playSound('select');
           render();
         }
       }
@@ -529,7 +348,6 @@
 
     function swap(r1, c1, r2, c2) {
       isAnimating = true;
-      playSound('swap');
       [grid[r1][c1], grid[r2][c2]] = [grid[r2][c2], grid[r1][c1]];
       selected = null;
       render();
@@ -551,7 +369,6 @@
     function findMatches() {
       const matches = new Set();
 
-      // 横向
       for (let r = 0; r < ROWS; r++) {
         for (let c = 0; c < COLS - 2; c++) {
           const color = grid[r][c];
@@ -568,7 +385,6 @@
         }
       }
 
-      // 纵向
       for (let c = 0; c < COLS; c++) {
         for (let r = 0; r < ROWS - 2; r++) {
           const color = grid[r][c];
@@ -595,7 +411,6 @@
       const matches = findMatches();
       if (matches.length === 0) {
         isAnimating = false;
-        // 检查是否还有可消除的
         if (!hintShown) {
           hintShown = true;
           setTimeout(() => showHint(), 500);
@@ -608,9 +423,7 @@
       score += matches.length * 10 * combo;
       updateScore();
 
-      playSound('match');
       if (combo > 1) {
-        playSound('combo');
         showMessage(`<span class="combo">${combo} 连击！</span>`);
       }
 
@@ -675,8 +488,6 @@
       e.preventDefault();
       init();
     });
-
-    musicBtn.addEventListener('click', toggleMusic);
 
     init();
   </script>
